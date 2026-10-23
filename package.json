@@ -1,0 +1,20 @@
+{
+  "name": "gpa-planner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "绩点推演器 · 录入学过的课，设定目标绩点，反推剩余课程需要考多少分",
+  "keywords": [
+    "gpa",
+    "calculator",
+    "single-file",
+    "no-dependency"
+  ],
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node scripts/smoke-test.js",
+    "screenshots": "node scripts/capture-screenshots.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

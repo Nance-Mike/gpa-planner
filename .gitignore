@@ -1,0 +1,17 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+*.tmp
+
+# 工具数据
+.workbuddy/

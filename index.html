@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<!--
+  绩点推演器 · 保研目标反推
+  ------------------------------------------------------------------
+  单文件应用：无框架、无第三方依赖、无网络请求，浏览器直接打开即可运行。
+
+  结构索引
+    <style>  设计变量 → 基础布局 → 组件（推演面板 / 输入 / 进度条 / 课程表 / 滑块 / 弹窗）
+    <body>   Header → 推演面板（现状 + 目标 + 结论）→ 情景模拟 → 课程录入 → 使用说明
+    <script> 换算 scoreToPoint / pointToScore → 计算 compute → 渲染 render
+             → 事件绑定 → 本地存储 → Canvas 分享卡
+
+  核心公式
+    加权绩点 = Σ(学分 × 单科绩点) ÷ Σ学分
+    剩余所需 = [目标 × (已修学分 + 剩余学分) − 当前绩点 × 已修学分] ÷ 剩余学分
+    满绩上限 = (满分 × 剩余学分 + 当前绩点 × 已修学分) ÷ 总学分
+
+  换算口径
+    4.0 制：分档换算（90→4.0，85→3.7，82→3.3，78→3.0，75→2.7，72→2.3，68→2.0，64→1.5，60→1.0）
+    5.0 制：线性换算，绩点 =（成绩 − 50）÷ 10，60 分起算
+    百分制：直接使用加权平均分
+
+  数据：仅写入浏览器 localStorage（键名 gpa-planner-v1），不上传任何服务器。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="description" content="录入学过的课，设定目标绩点，反推剩余课程需要考多少分。支持 4.0 制、5.0 制与百分制，数据仅保存在本地。" />
+<meta name="theme-color" content="#123A5F" />
+<title>绩点推演器 · 保研目标反推</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23123A5F'/%3E%3Cpath d='M14 46 L26 32 L36 38 L50 20' stroke='%235FD0E8' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    --bg:#F5F7FA;
+    --card:#FFFFFF;
+    --ink:#0E1B2C;
+    --ink2:#55677F;
+    --ink3:#8B99AC;
+    --line:#E7EBF1;
+    --brand:#123A5F;
+    --brand-soft:#EAF1F8;
+    --accent:#2E9BC4;
+    --ok:#0E9F6E;
+    --ok-soft:#E6F6F0;
+    --warn:#C2740A;
+    --warn-soft:#FDF3E3;
+    --bad:#C93B3B;
+    --bad-soft:#FCEEEE;
+    --r:16px;
+    --shadow:0 1px 2px rgba(16,32,54,.04), 0 8px 24px -12px rgba(16,32,54,.18);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Source Han Sans SC",sans-serif;
+    font-size:15px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    padding:0 0 110px;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:0 16px}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+  /* ---------- header ---------- */
+  header{padding:26px 0 14px}
+  .badge-top{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:12px;letter-spacing:.04em;color:var(--brand);
+    background:var(--brand-soft);border:1px solid #DCE7F1;
+    padding:4px 10px;border-radius:999px;font-weight:600;
+  }
+  h1{font-size:25px;line-height:1.3;margin:12px 0 6px;letter-spacing:-.01em;font-weight:700}
+  .sub{color:var(--ink2);font-size:14px;margin:0;text-wrap:balance}
+
+  /* ---------- card ---------- */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:18px;margin-top:14px;
+  }
+  .card-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .card-title{font-size:14px;font-weight:700;letter-spacing:.01em;display:flex;align-items:center;gap:7px}
+  .card-title i{width:3px;height:14px;border-radius:2px;background:var(--accent);display:inline-block}
+  .hint{font-size:12px;color:var(--ink3)}
+
+  /* ---------- segmented ---------- */
+  .seg{display:flex;background:#F0F3F7;border-radius:10px;padding:3px;gap:2px;flex-shrink:0}
+  .seg button{
+    flex:1;border:0;background:transparent;color:var(--ink2);white-space:nowrap;
+    font-size:12.5px;font-weight:600;padding:7px 9px;border-radius:8px;cursor:pointer;
+    font-family:inherit;transition:.15s;
+  }
+  .seg button.on{background:#fff;color:var(--brand);box-shadow:0 1px 3px rgba(16,32,54,.1)}
+
+  /* ---------- snapshot ---------- */
+  .snap{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:2px 0 4px}
+  .snap .v{font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.25}
+  .snap .k{font-size:11.5px;color:var(--ink3);margin-top:2px}
+  .snap .cell{text-align:center;padding:10px 4px;border-radius:12px;background:#FAFBFD;border:1px solid #EFF3F8}
+  .snap .cell.em{background:var(--brand-soft);border-color:#DCE7F1}
+  .snap .cell.em .v{color:var(--brand)}
+
+  /* ---------- inputs ---------- */
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .field label{display:block;font-size:12px;color:var(--ink2);font-weight:600;margin-bottom:6px}
+  .inp{
+    width:100%;border:1px solid var(--line);background:#FBFCFE;border-radius:11px;
+    padding:11px 12px;font-size:16px;font-family:inherit;color:var(--ink);
+    outline:none;transition:.15s;font-weight:600;
+  }
+  .inp:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(46,155,196,.12)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .chip{
+    border:1px solid var(--line);background:#fff;color:var(--ink2);border-radius:8px;
+    font-size:12px;padding:4px 9px;cursor:pointer;font-family:inherit;font-weight:600;transition:.15s;
+  }
+  .chip:hover{border-color:#CBD6E3;color:var(--brand)}
+  .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+
+  /* ---------- verdict ---------- */
+  .verdict{margin-top:16px;border-top:1px dashed var(--line);padding-top:16px}
+  .v-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .v-big{font-size:38px;font-weight:800;letter-spacing:-.03em;line-height:1.05;color:var(--brand)}
+  .v-big small{font-size:15px;font-weight:700;color:var(--ink2);margin-left:4px;letter-spacing:0}
+  .v-label{font-size:12.5px;color:var(--ink2);margin-bottom:4px;font-weight:600}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+    padding:6px 12px;border-radius:999px;white-space:nowrap;
+  }
+  .pill.ok{background:var(--ok-soft);color:var(--ok)}
+  .pill.info{background:var(--brand-soft);color:var(--brand)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.bad{background:var(--bad-soft);color:var(--bad)}
+  .v-note{margin-top:12px;font-size:13.5px;color:var(--ink2);line-height:1.65}
+  .v-note b{color:var(--ink);font-weight:700}
+
+  /* ---------- bar ---------- */
+  .bar-wrap{margin-top:16px}
+  .bar{position:relative;height:8px;border-radius:99px;background:#EDF1F6;overflow:visible}
+  .bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,#2E9BC4,#123A5F);transition:width .35s cubic-bezier(.2,.8,.2,1)}
+  .bar-tick{position:absolute;top:-4px;width:2px;height:16px;background:#0E1B2C;border-radius:2px;transition:left .35s}
+  .bar-tick::after{
+    content:attr(data-l);position:absolute;top:-19px;left:50%;transform:translateX(var(--tx,-50%));
+    font-size:10.5px;color:var(--ink3);white-space:nowrap;font-weight:600;
+  }
+  .bar-scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink3);margin-top:7px}
+
+  /* ---------- course table ---------- */
+  .cr-head,.cr{display:grid;grid-template-columns:1fr 72px 72px 30px;gap:8px;align-items:center}
+  .cr-head{font-size:11.5px;color:var(--ink3);font-weight:600;padding:0 2px 8px}
+  .cr-head span:nth-child(2),.cr-head span:nth-child(3){text-align:center}
+  .cr{margin-bottom:8px}
+  .cr input{
+    border:1px solid var(--line);background:#FBFCFE;border-radius:9px;padding:9px 10px;
+    font-size:14px;font-family:inherit;outline:none;width:100%;color:var(--ink);transition:.15s;
+  }
+  .cr input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(46,155,196,.1)}
+  .cr input.c{text-align:center;font-weight:700}
+  .cr .del{
+    border:0;background:transparent;color:var(--ink3);font-size:17px;cursor:pointer;
+    border-radius:8px;height:34px;line-height:1;font-family:inherit;
+  }
+  .cr .del:hover{background:var(--bad-soft);color:var(--bad)}
+  .empty{
+    text-align:center;color:var(--ink3);font-size:13px;padding:22px 10px;
+    border:1px dashed var(--line);border-radius:12px;background:#FBFCFE;
+  }
+  .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .btn{
+    border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
+    padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;
+  }
+  .btn:hover{border-color:#CBD6E3;background:#FAFBFD}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.primary:hover{background:#0E3050}
+  .btn.ghost{color:var(--ink2)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+
+  /* ---------- slider ---------- */
+  .sim-val{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+  .sim-val .big{font-size:26px;font-weight:800;letter-spacing:-.02em;color:var(--brand)}
+  .sim-val .t{font-size:12.5px;color:var(--ink2)}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:99px;
+    background:#EDF1F6;outline:none;margin:6px 0 2px;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#fff;
+    border:3px solid var(--brand);box-shadow:0 2px 6px rgba(16,32,54,.2);cursor:pointer;
+  }
+  input[type=range]::-moz-range-thumb{
+    width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--brand);cursor:pointer;
+  }
+  .sim-out{margin-top:12px;background:#FAFBFD;border:1px solid #EFF3F8;border-radius:12px;padding:12px 14px;font-size:13.5px;color:var(--ink2)}
+  .sim-out b{color:var(--ink);font-weight:700;font-size:15px}
+
+  /* ---------- details / help ---------- */
+  details.help{margin-top:14px;background:#fff;border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+  details.help summary{
+    list-style:none;cursor:pointer;padding:15px 18px;font-size:13.5px;font-weight:700;
+    display:flex;align-items:center;justify-content:space-between;color:var(--ink)
+  }
+  details.help summary::-webkit-details-marker{display:none}
+  details.help summary::after{content:"展开";font-size:12px;color:var(--ink3);font-weight:600}
+  details.help[open] summary::after{content:"收起"}
+  .help-body{padding:0 18px 18px;font-size:13px;color:var(--ink2);line-height:1.75}
+  .help-body h4{margin:14px 0 6px;font-size:13px;color:var(--ink)}
+  .help-body ol,.help-body ul{margin:6px 0;padding-left:20px}
+  .help-body li{margin:3px 0}
+  .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  .tbl th,.tbl td{border:1px solid var(--line);padding:6px 8px;text-align:left}
+  .tbl th{background:#FAFBFD;color:var(--ink2);font-weight:600}
+
+  footer{text-align:center;font-size:11.5px;color:var(--ink3);margin-top:22px;line-height:1.7}
+
+  /* ---------- toast ---------- */
+  .toast{
+    position:fixed;left:50%;bottom:34px;transform:translate(-50%,14px);
+    background:#0E1B2C;color:#fff;font-size:13px;padding:10px 18px;border-radius:999px;
+    opacity:0;pointer-events:none;transition:.25s;z-index:99;box-shadow:0 8px 24px rgba(14,27,44,.3);
+    max-width:86vw;text-align:center;
+  }
+  .toast.on{opacity:1;transform:translate(-50%,0)}
+
+  /* ---------- modal ---------- */
+  .modal{position:fixed;inset:0;background:rgba(14,27,44,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:18px}
+  .modal.on{display:flex}
+  .modal-box{background:#fff;border-radius:18px;width:100%;max-width:420px;padding:20px;max-height:86vh;overflow:auto}
+  .modal-box h3{margin:0 0 6px;font-size:16px}
+  .modal-box p{margin:0 0 12px;font-size:12.5px;color:var(--ink2)}
+  .modal-box textarea{
+    width:100%;min-height:150px;border:1px solid var(--line);border-radius:11px;padding:11px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.7;
+    outline:none;resize:vertical;background:#FBFCFE;color:var(--ink);
+  }
+  .modal-box textarea:focus{border-color:var(--accent);background:#fff}
+  .modal-foot{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+
+  @media (max-width:430px){
+    .row{grid-template-columns:1fr;gap:16px}
+    .snap .v{font-size:19px}
+    .v-big{font-size:32px}
+    .cr-head,.cr{grid-template-columns:1fr 62px 62px 28px;gap:6px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="badge-top">保研目标反推</span>
+    <h1>绩点推演器</h1>
+    <p class="sub">录入学过的课，设定目标绩点，反推剩下的课需要考多少分。</p>
+  </header>
+
+  <!-- ===== 主卡：现状 + 目标 + 结论 ===== -->
+  <section class="card">
+    <div class="card-hd">
+      <div class="card-title"><i></i>推演面板</div>
+      <div class="seg" id="seg">
+        <button data-s="4.0" class="on">4.0 制</button>
+        <button data-s="5.0">5.0 制</button>
+        <button data-s="100">百分制</button>
+      </div>
+    </div>
+
+    <div class="snap">
+      <div class="cell em">
+        <div class="v num" id="curGpa">—</div>
+        <div class="k" id="curGpaLabel">加权绩点</div>
+      </div>
+      <div class="cell">
+        <div class="v num" id="curScore">—</div>
+        <div class="k" id="curScoreLabel">加权平均分</div>
+      </div>
+      <div class="cell">
+        <div class="v num" id="curCredit">0</div>
+        <div class="k">已修学分</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label id="targetLabel">目标绩点</label>
+        <input class="inp num" id="target" type="number" inputmode="decimal" step="0.01" placeholder="3.80" />
+        <div class="chips" id="targetChips"></div>
+      </div>
+      <div class="field">
+        <label>剩余学分</label>
+        <input class="inp num" id="remain" type="number" inputmode="decimal" step="0.5" placeholder="18" />
+        <div class="chips">
+          <button class="chip" data-remain="12">12</button>
+          <button class="chip" data-remain="18">18</button>
+          <button class="chip" data-remain="24">24</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <div class="v-head">
+        <div>
+          <div class="v-label" id="needLabel">剩余课程需要平均达到</div>
+          <div class="v-big num"><span id="needVal">—</span><small id="needUnit"></small></div>
+        </div>
+        <span class="pill info" id="verdictPill">等待录入</span>
+      </div>
+
+      <div class="bar-wrap">
+        <div class="bar">
+          <div class="bar-fill" id="barFill" style="width:0%"></div>
+          <div class="bar-tick" id="barTick" data-l="目标" style="left:0%"></div>
+        </div>
+        <div class="bar-scale"><span>0</span><span id="barMax">4.0</span></div>
+      </div>
+
+      <div class="v-note" id="verdictNote">录入至少一门课，或直接填写目标与剩余学分，即可开始推演。</div>
+
+      <div class="actions" style="margin-top:14px">
+        <button class="btn primary" id="exportBtn" style="flex:1">生成分享卡</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== 情景模拟 ===== -->
+  <section class="card">
+    <div class="card-hd">
+      <div class="card-title"><i></i>情景模拟</div>
+      <span class="hint" id="simHint">假设剩余课程的平均水平</span>
+    </div>
+    <div class="sim-val">
+      <span class="big num" id="simScore">85</span>
+      <span class="t">分</span>
+    </div>
+    <input type="range" id="simRange" min="50" max="100" value="85" step="0.5" />
+    <div class="sim-out" id="simOut">—</div>
+  </section>
+
+  <!-- ===== 课程录入 ===== -->
+  <section class="card" id="coursesCard">
+    <div class="card-hd">
+      <div class="card-title"><i></i>已修课程</div>
+      <span class="hint" id="courseCount">0 门</span>
+    </div>
+    <div class="cr-head">
+      <span>课程名称</span><span>学分</span><span>成绩</span><span></span>
+    </div>
+    <div id="courseList"></div>
+    <div class="actions">
+      <button class="btn primary" id="addCourse">+ 添加课程</button>
+      <button class="btn" id="batchBtn">批量粘贴</button>
+      <button class="btn ghost" id="demoBtn">填入示例</button>
+      <button class="btn ghost" id="clearBtn">清空</button>
+    </div>
+  </section>
+
+  <!-- ===== 说明 ===== -->
+  <details class="help">
+    <summary>使用说明与算法规则</summary>
+    <div class="help-body">
+      <h4>怎么用</h4>
+      <ol>
+        <li>先选<b>绩点制式</b>，与学校教务系统一致即可（4.0 制 / 5.0 制 / 百分制）。</li>
+        <li>在「已修课程」里逐门录入学分与成绩；也可点「批量粘贴」，一行一门，格式为 <code>课程名 学分 成绩</code>。</li>
+        <li>在上方填写<b>目标绩点</b>与<b>剩余学分</b>，页面即刻算出剩余课程需要达到的平均水平。</li>
+        <li>拖动情景模拟滑块，可以看不同发挥下的最终结果。</li>
+        <li>点「生成分享卡」可保存一张结果图，方便留存或分享。</li>
+      </ol>
+      <h4>计算口径</h4>
+      <ul>
+        <li>加权绩点 = Σ(学分 × 单科绩点) ÷ Σ学分；加权平均分同理按百分制成绩计算。</li>
+        <li>剩余所需绩点 = [目标 × (已修学分 + 剩余学分) − 当前绩点 × 已修学分] ÷ 剩余学分。</li>
+        <li>若该结果超过当前制式的满分，说明即便剩余课程全部满绩也无法达成目标，页面会给出可达上限。</li>
+      </ul>
+      <h4>成绩换算为绩点</h4>
+      <table class="tbl">
+        <tr><th>成绩</th><th>4.0 制</th><th>5.0 制</th></tr>
+        <tr><td>90—100</td><td>4.0</td><td>4.0—5.0</td></tr>
+        <tr><td>85—89</td><td>3.7</td><td>3.5—3.9</td></tr>
+        <tr><td>82—84</td><td>3.3</td><td>3.2—3.4</td></tr>
+        <tr><td>78—81</td><td>3.0</td><td>2.8—3.1</td></tr>
+        <tr><td>75—77</td><td>2.7</td><td>2.5—2.7</td></tr>
+        <tr><td>72—74</td><td>2.3</td><td>2.2—2.4</td></tr>
+        <tr><td>68—71</td><td>2.0</td><td>1.8—2.1</td></tr>
+        <tr><td>64—67</td><td>1.5</td><td>1.4—1.7</td></tr>
+        <tr><td>60—63</td><td>1.0</td><td>1.0—1.3</td></tr>
+      </table>
+      <p style="margin-top:8px">各校换算细则略有差异，本工具采用最常见的分档口径（4.0 制）与线性口径（5.0 制：绩点 =（成绩 − 50）÷ 10）。若学校另有规定，以教务系统为准。</p>
+      <p>需要注意：4.0 制是<b>分档换算</b>，档位之间不连续，所以「剩余课程平均需达到 3.72」在操作层面等同于「多数课程要考进 90 分档」——页面给出的「约 X 分档」就是这个含义。5.0 制与百分制为连续换算，不存在这个跳跃。</p>
+      <p>所有数据仅保存在你自己的浏览器本地，不会上传。</p>
+    </div>
+  </details>
+
+  <footer>
+    绩点推演器 · 数据仅存本地，刷新不丢失<br />
+    换算口径以你所在学校教务规定为准，结果仅供规划参考
+  </footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 分享卡预览 -->
+<div class="modal" id="cardModal">
+  <div class="modal-box" style="text-align:center">
+    <h3 style="margin-bottom:12px">分享卡已生成</h3>
+    <img id="cardImg" alt="绩点推演分享卡" style="width:100%;border-radius:12px;display:block;box-shadow:0 6px 20px rgba(14,27,44,.18)" />
+    <p style="margin:12px 0 0">手机上长按图片即可保存到相册；电脑端右键选择「图片另存为」。</p>
+    <div class="modal-foot" style="justify-content:center">
+      <a class="btn primary" id="cardDl" style="text-decoration:none;display:inline-block">下载图片</a>
+      <button class="btn ghost" id="cardClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批量粘贴 -->
+<div class="modal" id="batchModal">
+  <div class="modal-box">
+    <h3>批量粘贴课程</h3>
+    <p>每行一门，格式：<b>课程名 学分 成绩</b>，用空格、逗号或制表符分隔。只填「学分 成绩」也可以。</p>
+    <textarea id="batchText" placeholder="高等数学A 5 88&#10;大学物理 4 85&#10;电路分析基础 3.5 82&#10;3 91"></textarea>
+    <div class="modal-foot">
+      <button class="btn ghost" id="batchCancel">取消</button>
+      <button class="btn primary" id="batchOk">导入</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var KEY = "gpa-planner-v1";
+  var SCALES = {
+    "4.0": {max:4.0, step:0.01, unit:"", name:"4.0 制"},
+    "5.0": {max:5.0, step:0.01, unit:"", name:"5.0 制"},
+    "100": {max:100,  step:0.5,  unit:"分", name:"百分制"}
+  };
+
+  var state = {
+    scale: "4.0",
+    courses: [],
+    target: 3.8,
+    remain: 18,
+    sim: 85
+  };
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ---------- 换算 ---------- */
+  function scoreToPoint(score, scale){
+    if (scale === "100") return clamp(score, 0, 100);
+    if (scale === "5.0") return score >= 60 ? Math.min(5, (score - 50) / 10) : 0;
+    // 4.0 分档
+    if (score >= 90) return 4.0;
+    if (score >= 85) return 3.7;
+    if (score >= 82) return 3.3;
+    if (score >= 78) return 3.0;
+    if (score >= 75) return 2.7;
+    if (score >= 72) return 2.3;
+    if (score >= 68) return 2.0;
+    if (score >= 64) return 1.5;
+    if (score >= 60) return 1.0;
+    return 0;
+  }
+
+  // 给定绩点，反查达到该绩点的最低成绩
+  function pointToScore(point, scale){
+    if (scale === "100") return clamp(point, 0, 100);
+    if (scale === "5.0") return clamp(50 + point * 10, 0, 100);
+    var tiers = [[0,0],[1.0,60],[1.5,64],[2.0,68],[2.3,72],[2.7,75],[3.0,78],[3.3,82],[3.7,85],[4.0,90]];
+    for (var i = 0; i < tiers.length; i++){
+      if (tiers[i][0] >= point - 1e-9) return tiers[i][1];
+    }
+    return 100;
+  }
+
+  function clamp(v, a, b){ return Math.min(b, Math.max(a, v)); }
+  function fmt(v, d){
+    if (!isFinite(v)) return "—";
+    return Number(v).toFixed(d == null ? 2 : d);
+  }
+  // 去掉无意义的尾随 0：90.0 -> 90，3.50 -> 3.5
+  function trimNum(v, d){
+    if (!isFinite(v)) return "—";
+    var s = Number(v).toFixed(d == null ? 2 : d);
+    return s.indexOf(".") >= 0 ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
+  }
+
+  /* ---------- 核心计算 ---------- */
+  function compute(){
+    var scale = state.scale;
+    var max = SCALES[scale].max;
+    var C1 = 0, sumP = 0, sumS = 0, valid = 0;
+
+    state.courses.forEach(function(c){
+      var cr = parseFloat(c.credit);
+      var sc = parseFloat(c.score);
+      if (!(cr > 0) || isNaN(sc)) return;
+      sc = clamp(sc, 0, 100);
+      C1 += cr;
+      sumS += cr * sc;
+      sumP += cr * scoreToPoint(sc, scale);
+      valid++;
+    });
+
+    var gpa = C1 > 0 ? sumP / C1 : null;
+    var avgScore = C1 > 0 ? sumS / C1 : null;
+
+    var C2 = parseFloat(state.remain);
+    C2 = isNaN(C2) ? 0 : Math.max(0, C2);
+    var target = parseFloat(state.target);
+    var hasTarget = !isNaN(target) && target > 0;
+
+    var need = null, needScore = null, maxFinal = null, verdict = "idle", note = "";
+    var isScore = (scale === "100");
+    var d = isScore ? 1 : 2;
+    var gpaWord = isScore ? "加权平均分" : "加权绩点";
+    var sw = (scale === "4.0") ? " 分档" : " 分";
+    var fN = function(v){ return fmt(v, d); };
+    var needTxt = function(v){ return "<b>" + fN(v) + "</b>" + (isScore ? " 分" : ""); };
+    var hintTxt = function(){ return isScore ? "" : "（约 <b>" + fmt(needScore, 0) + sw + "</b>）"; };
+
+    if (hasTarget){
+      if (C2 <= 0){
+        verdict = (gpa == null) ? "idle" : (gpa + 1e-9 >= target ? "ok" : "bad");
+        need = null;
+        note = (gpa == null)
+          ? "填写剩余学分后可开始推演。"
+          : (gpa + 1e-9 >= target
+              ? "已修课程" + gpaWord + " <b>" + fN(gpa) + "</b>，已达到目标 <b>" + fN(target) + "</b>。"
+              : "已修课程" + gpaWord + " <b>" + fN(gpa) + "</b>，距离目标 <b>" + fN(target) + "</b> 还差 <b>" + fN(target - gpa) + "</b>，但剩余学分为 0，已无提升空间。");
+      } else {
+        var base = (gpa == null) ? 0 : gpa;
+        var baseC = (gpa == null) ? 0 : C1;
+        need = (target * (baseC + C2) - base * baseC) / C2;
+        maxFinal = (max * C2 + base * baseC) / (baseC + C2);
+        needScore = pointToScore(Math.min(need, max), scale);
+
+        if (need > max + 1e-9){
+          verdict = "bad";
+          note = "按当前目标，剩余课程平均需达到 " + needTxt(need) + "，已超出满分 <b>" + fN(max) + "</b>。" +
+                 "即便剩余课程全部满绩，最终" + gpaWord + "最高也只有 <b>" + fN(maxFinal) + "</b>，建议把目标调整到该值以下。";
+        } else if (need >= max * 0.97){
+          verdict = "warn";
+          note = "要求接近满绩（" + needTxt(need) + hintTxt() + "），容错空间很小：剩余 " + fmt(C2, 1) + " 学分里只要有一门明显失手，目标就会滑落。";
+        } else if (gpa != null && need > gpa + 1e-9){
+          verdict = "warn";
+          note = "剩余课程平均需达到 " + needTxt(need) + hintTxt() + "，比当前" + gpaWord + "高 <b>" + fN(need - gpa) + "</b>，属于需要往上冲一档。";
+        } else {
+          verdict = "ok";
+          note = "剩余课程平均达到 " + needTxt(need) + hintTxt() + "即可达成目标。" +
+                 (gpa != null && gpa > need ? "这个要求低于你现在的水平，留有余量。" : "");
+        }
+
+        if (gpa == null){
+          verdict = "idle";
+          note = "尚未录入已修课程，按「全部课程需平均达到 " + needTxt(need) + hintTxt() + "」估算。" +
+                 "录入已修成绩后，结论会更准确。";
+        }
+      }
+    } else {
+      note = "填写目标" + (isScore ? "平均分" : "绩点") + "后即可反推剩余课程需要达到的水平。";
+    }
+
+    return {
+      scale:scale, max:max, credit:C1, gpa:gpa, avgScore:avgScore,
+      remain:C2, target:hasTarget ? target : null,
+      need:need, needScore:needScore, maxFinal:maxFinal,
+      verdict:verdict, note:note, validCount:valid
+    };
+  }
+
+  /* ---------- 渲染 ---------- */
+  function render(){
+    var r = compute();
+    var sc = SCALES[state.scale];
+
+    // 现状
+    var isScore = state.scale === "100";
+    var dd = isScore ? 1 : 2;
+    $("curGpa").textContent = (r.gpa == null) ? "—" : fmt(r.gpa, dd);
+    $("curGpaLabel").textContent = isScore ? "加权平均分" : "加权绩点";
+    if (isScore){
+      $("curScore").textContent = r.validCount ? String(r.validCount) : "—";
+      $("curScoreLabel").textContent = "课程门数";
+    } else {
+      $("curScore").textContent = (r.avgScore == null) ? "—" : fmt(r.avgScore, 1);
+      $("curScoreLabel").textContent = "加权平均分";
+    }
+    $("curCredit").textContent = fmt(r.credit, r.credit % 1 === 0 ? 0 : 1);
+
+    $("targetLabel").textContent = state.scale === "100" ? "目标加权平均分" : "目标绩点";
+    $("needLabel").textContent = state.scale === "100" ? "剩余课程需要平均达到" : "剩余课程需要平均达到";
+    $("needUnit").textContent = sc.unit;
+    $("barMax").textContent = state.scale === "100" ? "100" : fmt(r.max, 1);
+
+    // 结论
+    if (r.need != null && isFinite(r.need)){
+      $("needVal").textContent = fmt(Math.max(0, r.need), state.scale === "100" ? 1 : 2);
+      $("needUnit").textContent = sc.unit;
+    } else {
+      $("needVal").textContent = "—";
+    }
+
+    var pill = $("verdictPill");
+    var map = {
+      idle:["info","待录入"],
+      ok:["ok","可以达成"],
+      warn:["warn","需要冲刺"],
+      bad:["bad","超出可达范围"]
+    };
+    var m = map[r.verdict] || map.idle;
+    pill.className = "pill " + m[0];
+    pill.textContent = m[1];
+
+    $("verdictNote").innerHTML = r.note;
+
+    // 进度条
+    var pct = function(v){ return clamp((v / r.max) * 100, 0, 100); };
+    if (r.gpa != null){
+      $("barFill").style.width = pct(r.gpa) + "%";
+    } else {
+      $("barFill").style.width = "0%";
+    }
+    if (r.target != null){
+      var tPct = pct(r.target);
+      $("barTick").style.left = tPct + "%";
+      $("barTick").style.setProperty("--tx", tPct > 78 ? "-100%" : (tPct < 14 ? "0%" : "-50%"));
+      $("barTick").setAttribute("data-l", "目标 " + (isScore ? trimNum(r.target, 0) : Number(r.target).toFixed(1)));
+    } else {
+      $("barTick").style.left = "0%";
+      $("barTick").setAttribute("data-l", "目标");
+    }
+
+    // 课程数
+    $("courseCount").textContent = r.validCount + " 门";
+
+    // 模拟
+    var simPoint = scoreToPoint(state.sim, state.scale);
+    var finalGpa;
+    if (!r.remain || r.remain <= 0){
+      finalGpa = r.gpa;
+    } else if (r.gpa == null){
+      finalGpa = simPoint;
+    } else {
+      finalGpa = (r.gpa * r.credit + simPoint * r.remain) / (r.credit + r.remain);
+    }
+    $("simScore").textContent = fmt(state.sim, state.sim % 1 === 0 ? 0 : 1);
+    var unit = state.scale === "100" ? "加权平均分" : "加权绩点";
+    var cmp = "";
+    if (r.target != null && finalGpa != null){
+      var d = finalGpa - r.target;
+      cmp = d >= -1e-9
+        ? "，<b style='color:var(--ok)'>高于目标 " + fmt(Math.abs(d), state.scale === "100" ? 1 : 2) + "</b>"
+        : "，距目标还差 <b style='color:var(--warn)'>" + fmt(Math.abs(d), state.scale === "100" ? 1 : 2) + "</b>";
+    }
+    $("simOut").innerHTML = finalGpa == null
+      ? "录入课程后即可模拟。"
+      : "剩余课程平均 <b>" + fmt(state.sim, 0) + " 分</b>时，最终" + unit + "约为 <b>" + fmt(finalGpa, state.scale === "100" ? 1 : 2) + "</b>" + cmp + "。";
+
+    save();
+  }
+
+  /* ---------- 课程表 ---------- */
+  function renderCourses(){
+    var list = $("courseList");
+    if (!state.courses.length){
+      list.innerHTML = '<div class="empty">还没有课程。点「添加课程」逐门录入，或「填入示例」先看看效果。</div>';
+      return;
+    }
+    var html = "";
+    state.courses.forEach(function(c, i){
+      html += '<div class="cr">' +
+        '<input data-i="' + i + '" data-f="name" value="' + escAttr(c.name) + '" placeholder="课程名" />' +
+        '<input class="c" data-i="' + i + '" data-f="credit" value="' + escAttr(c.credit) + '" inputmode="decimal" placeholder="学分" />' +
+        '<input class="c" data-i="' + i + '" data-f="score" value="' + escAttr(c.score) + '" inputmode="decimal" placeholder="成绩" />' +
+        '<button class="del" data-i="' + i + '" title="删除">✕</button>' +
+      '</div>';
+    });
+    list.innerHTML = html;
+  }
+
+  function escAttr(v){
+    return String(v == null ? "" : v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  }
+
+  /* ---------- 事件 ---------- */
+  $("courseList").addEventListener("input", function(e){
+    var el = e.target;
+    if (el.tagName !== "INPUT") return;
+    var i = +el.dataset.i, f = el.dataset.f;
+    if (!state.courses[i]) return;
+    state.courses[i][f] = el.value;
+    render();
+  });
+
+  $("courseList").addEventListener("click", function(e){
+    if (!e.target.classList.contains("del")) return;
+    var i = +e.target.dataset.i;
+    state.courses.splice(i, 1);
+    renderCourses();
+    render();
+  });
+
+  $("addCourse").addEventListener("click", function(){
+    state.courses.push({name:"", credit:"", score:""});
+    renderCourses();
+    render();
+    var rows = $("courseList").querySelectorAll(".cr");
+    var last = rows[rows.length - 1];
+    if (last) last.querySelector("input").focus();
+  });
+
+  $("clearBtn").addEventListener("click", function(){
+    if (!state.courses.length){ toast("已经是空的"); return; }
+    state.courses = [];
+    renderCourses();
+    render();
+    toast("已清空课程");
+  });
+
+  $("demoBtn").addEventListener("click", function(){
+    state.courses = [
+      {name:"高等数学 A(1)", credit:"5", score:"88"},
+      {name:"线性代数", credit:"3", score:"84"},
+      {name:"大学物理 B", credit:"4", score:"81"},
+      {name:"电路分析基础", credit:"3.5", score:"86"},
+      {name:"程序设计基础", credit:"3", score:"92"},
+      {name:"大学英语(3)", credit:"2", score:"79"}
+    ];
+    state.remain = 20;
+    if (state.scale === "4.0") state.target = 3.6;
+    else if (state.scale === "5.0") state.target = 4.4;
+    else state.target = 89;
+    $("target").value = state.target;
+    $("remain").value = state.remain;
+    renderCourses();
+    render();
+    paintChips();
+    toast("已填入示例数据");
+  });
+
+  // 制式切换
+  $("seg").addEventListener("click", function(e){
+    var b = e.target.closest("button");
+    if (!b) return;
+    var oldScale = state.scale;
+    var newScale = b.dataset.s;
+    if (oldScale === newScale) return;
+    state.scale = newScale;
+    Array.prototype.forEach.call($("seg").children, function(x){
+      x.classList.toggle("on", x.dataset.s === newScale);
+    });
+    // 目标值按比例换算到新制式，保持同等难度
+    var oldMax = SCALES[oldScale].max, newMax = SCALES[newScale].max;
+    var nt = state.target ? (state.target / oldMax) * newMax : newMax * 0.95;
+    state.target = parseFloat(nt.toFixed(newScale === "100" ? 0 : 2));
+    $("target").value = state.target;
+    paintChips();
+    render();
+  });
+
+  function paintChips(){
+    var presets = state.scale === "100" ? [85, 88, 90, 95] : (state.scale === "5.0" ? [4.0, 4.25, 4.5, 4.8] : [3.3, 3.5, 3.7, 3.9]);
+    var box = $("targetChips");
+    box.innerHTML = presets.map(function(p){
+      return '<button class="chip' + (Math.abs(p - state.target) < 1e-9 ? " on" : "") + '" data-t="' + p + '">' + p + '</button>';
+    }).join("");
+  }
+
+  $("targetChips").addEventListener("click", function(e){
+    var b = e.target.closest(".chip");
+    if (!b) return;
+    state.target = parseFloat(b.dataset.t);
+    $("target").value = state.target;
+    paintChips();
+    render();
+  });
+
+  document.querySelectorAll("[data-remain]").forEach(function(b){
+    b.addEventListener("click", function(){
+      state.remain = parseFloat(b.dataset.remain);
+      $("remain").value = state.remain;
+      render();
+    });
+  });
+
+  $("target").addEventListener("input", function(){
+    state.target = parseFloat(this.value);
+    render();
+    paintChips();
+  });
+
+  $("remain").addEventListener("input", function(){
+    state.remain = parseFloat(this.value);
+    render();
+  });
+
+  $("simRange").addEventListener("input", function(){
+    state.sim = parseFloat(this.value);
+    render();
+  });
+
+  /* ---------- 批量粘贴 ---------- */
+  $("batchBtn").addEventListener("click", function(){
+    $("batchModal").classList.add("on");
+    setTimeout(function(){ $("batchText").focus(); }, 60);
+  });
+  $("batchCancel").addEventListener("click", function(){
+    $("batchModal").classList.remove("on");
+  });
+  $("batchModal").addEventListener("click", function(e){
+    if (e.target === this) this.classList.remove("on");
+  });
+  $("batchOk").addEventListener("click", function(){
+    var raw = $("batchText").value || "";
+    var lines = raw.split(/\r?\n/);
+    var added = 0;
+    lines.forEach(function(line){
+      line = line.trim();
+      if (!line) return;
+      var parts = line.split(/[\s,，\t]+/).filter(Boolean);
+      if (parts.length < 2) return;
+      var score = parts[parts.length - 1];
+      var credit = parts[parts.length - 2];
+      var name = parts.slice(0, parts.length - 2).join(" ");
+      if (isNaN(parseFloat(score)) || isNaN(parseFloat(credit))) return;
+      state.courses.push({
+        name: name || ("课程 " + (state.courses.length + 1)),
+        credit: credit, score: score
+      });
+      added++;
+    });
+    $("batchModal").classList.remove("on");
+    $("batchText").value = "";
+    renderCourses();
+    render();
+    toast(added ? ("已导入 " + added + " 门课程") : "没有识别到有效行，请检查格式");
+  });
+
+  /* ---------- 保存 ---------- */
+  function save(){
+    try{
+      localStorage.setItem(KEY, JSON.stringify(state));
+    }catch(e){}
+  }
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return;
+      var d = JSON.parse(raw);
+      if (d && typeof d === "object"){
+        state.scale = d.scale || "4.0";
+        state.courses = Array.isArray(d.courses) ? d.courses : [];
+        state.target = typeof d.target === "number" ? d.target : 3.8;
+        state.remain = typeof d.remain === "number" ? d.remain : 18;
+        state.sim = typeof d.sim === "number" ? d.sim : 85;
+      }
+    }catch(e){}
+  }
+
+  /* ---------- toast ---------- */
+  var toastTimer;
+  function toast(msg){
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("on"); }, 1800);
+  }
+
+  /* ---------- 分享卡 ---------- */
+  $("exportBtn").addEventListener("click", function(){
+    var r = compute();
+    var W = 1080, H = 1350;
+    var cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    var g = cv.getContext("2d");
+    var isScore = state.scale === "100";
+    var dd = isScore ? 1 : 2;
+
+    // 背景
+    var bg = g.createLinearGradient(0, 0, W, H);
+    bg.addColorStop(0, "#0C243B");
+    bg.addColorStop(0.55, "#123A5F");
+    bg.addColorStop(1, "#0A2033");
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+
+    // 光斑
+    var rg = g.createRadialGradient(W * 0.82, H * 0.12, 0, W * 0.82, H * 0.12, W * 0.62);
+    rg.addColorStop(0, "rgba(46,155,196,.34)");
+    rg.addColorStop(1, "rgba(46,155,196,0)");
+    g.fillStyle = rg;
+    g.fillRect(0, 0, W, H);
+
+    var pad = 92;
+    var font = function(px, weight){
+      return (weight || 400) + " " + px + 'px -apple-system,"PingFang SC","Microsoft YaHei",sans-serif';
+    };
+
+    // 顶部标识
+    g.fillStyle = "rgba(255,255,255,.62)";
+    g.font = font(30, 600);
+    g.fillText("绩点推演器 · 保研目标反推", pad, 130);
+
+    g.fillStyle = "rgba(255,255,255,.14)";
+    g.fillRect(pad, 166, W - pad * 2, 1);
+
+    // 主数字
+    g.fillStyle = "rgba(255,255,255,.55)";
+    g.font = font(30, 500);
+    g.fillText(isScore ? "当前加权平均分" : "当前加权绩点", pad, 266);
+
+    g.fillStyle = "#FFFFFF";
+    g.font = font(186, 800);
+    var mainNum = r.gpa == null ? "--" : fmt(r.gpa, dd);
+    g.fillText(mainNum, pad - 6, 442);
+
+    if (!isScore){
+      var numW = g.measureText(mainNum).width;
+      g.fillStyle = "rgba(255,255,255,.42)";
+      g.font = font(50, 600);
+      g.fillText("/ " + fmt(r.max, 1), pad + numW + 18, 442);
+    }
+
+    // 次信息
+    g.fillStyle = "rgba(255,255,255,.62)";
+    g.font = font(34, 500);
+    g.fillText("已修 " + trimNum(r.credit, 1) + " 学分 · " + r.validCount + " 门课程", pad, 506);
+
+    // 分隔
+    g.fillStyle = "rgba(255,255,255,.12)";
+    g.fillRect(pad, 564, W - pad * 2, 1);
+
+    // 目标行
+    g.fillStyle = "rgba(255,255,255,.72)";
+    g.font = font(32, 600);
+    g.fillText("目标 " + (r.target == null ? "--" : trimNum(r.target, isScore ? 0 : 2)) +
+               " · 剩余 " + trimNum(r.remain, 1) + " 学分", pad, 642);
+
+    g.fillStyle = "rgba(255,255,255,.5)";
+    g.font = font(30, 500);
+    g.fillText("剩余课程需要平均达到", pad, 714);
+
+    g.fillStyle = "#5FD0E8";
+    g.font = font(108, 800);
+    var needNum = (r.need == null || !isFinite(r.need)) ? "--" : fmt(Math.max(0, r.need), dd);
+    g.fillText(needNum, pad - 4, 826);
+    if (isScore){
+      var nw = g.measureText(needNum).width;
+      g.fillStyle = "rgba(95,208,232,.72)";
+      g.font = font(42, 600);
+      g.fillText("分", pad + nw + 14, 824);
+    } else if (r.needScore != null && isFinite(r.needScore)){
+      var nw2 = g.measureText(needNum).width;
+      g.fillStyle = "rgba(255,255,255,.55)";
+      g.font = font(32, 500);
+      g.fillText(state.scale === "4.0" ? "≈ " + fmt(r.needScore, 0) + " 分档" : "≈ " + fmt(r.needScore, 0) + " 分", pad + nw2 + 22, 822);
+    }
+
+    // 状态
+    var vs = {
+      ok:["可以达成", "#31C48D"],
+      warn:["需要冲刺", "#F0A83C"],
+      bad:["超出可达范围", "#F0736E"],
+      idle:["待录入", "#8FA6BE"]
+    }[r.verdict] || ["待录入", "#8FA6BE"];
+
+    g.font = font(32, 700);
+    var tw = g.measureText(vs[0]).width;
+    var bx = pad, by = 876, bh = 62;
+    g.fillStyle = "rgba(255,255,255,.08)";
+    roundRect(g, bx, by, tw + 56, bh, 31);
+    g.fill();
+    g.fillStyle = vs[1];
+    g.beginPath();
+    g.arc(bx + 30, by + bh / 2, 7, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = vs[1];
+    g.fillText(vs[0], bx + 48, by + 42);
+
+    // 对照结论：短句，避免长文本溢出
+    var cmpTitle, cmpSub;
+    if (r.verdict === "bad"){
+      cmpTitle = "上限 " + fmt(r.maxFinal, dd);
+      cmpSub = "即便剩余课程全部满绩，也够不到当前目标";
+    } else if (r.verdict === "warn" && r.need != null && r.gpa != null){
+      cmpTitle = "较当前需提升 " + fmt(Math.abs(r.need - r.gpa), dd) + (isScore ? " 分" : "");
+      cmpSub = "需要往上冲一档，容错空间有限";
+    } else if (r.verdict === "ok"){
+      cmpTitle = (r.need != null && r.gpa != null && r.need <= r.gpa)
+        ? "低于当前水平 " + fmt(Math.abs(r.gpa - r.need), dd) + (isScore ? " 分" : "")
+        : "可以达成";
+      cmpSub = "按当前进度，目标留有余量";
+    } else {
+      cmpTitle = "等待录入";
+      cmpSub = "录入已修课程后可查看完整推演";
+    }
+
+    g.fillStyle = "rgba(255,255,255,.92)";
+    g.font = font(44, 700);
+    g.fillText(cmpTitle, pad, 1040);
+
+    g.fillStyle = "rgba(255,255,255,.55)";
+    g.font = font(30, 400);
+    g.fillText(cmpSub, pad, 1098);
+
+    // 分隔
+    g.fillStyle = "rgba(255,255,255,.1)";
+    g.fillRect(pad, 1150, W - pad * 2, 1);
+
+    // 底部刻度条
+    var barY = 1204, barW = W - pad * 2;
+    g.fillStyle = "rgba(255,255,255,.13)";
+    roundRect(g, pad, barY, barW, 10, 5);
+    g.fill();
+    if (r.gpa != null){
+      var p = clamp(r.gpa / r.max, 0, 1);
+      var gd = g.createLinearGradient(pad, 0, pad + barW * Math.max(p, 0.02), 0);
+      gd.addColorStop(0, "#2E9BC4");
+      gd.addColorStop(1, "#5FD0E8");
+      g.fillStyle = gd;
+      roundRect(g, pad, barY, Math.max(6, barW * p), 10, 5);
+      g.fill();
+    }
+    if (r.target != null){
+      var tp = clamp(r.target / r.max, 0, 1);
+      g.fillStyle = "#FFFFFF";
+      roundRect(g, pad + barW * tp - 2, barY - 8, 4, 26, 2);
+      g.fill();
+    }
+
+    g.fillStyle = "rgba(255,255,255,.3)";
+    g.font = font(22, 400);
+    g.fillText("0", pad, barY + 40);
+    var maxTxt = isScore ? "100" : fmt(r.max, 1);
+    g.fillText(maxTxt, pad + barW - g.measureText(maxTxt).width, barY + 40);
+
+    g.fillStyle = "rgba(255,255,255,.34)";
+    g.font = font(26, 400);
+    g.fillText("用 WorkBuddy 绩点推演器生成 · 换算口径以本校教务规定为准", pad, 1300);
+
+    function roundRect(ctx, x, y, w, h, r2){
+      ctx.beginPath();
+      ctx.moveTo(x + r2, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r2);
+      ctx.arcTo(x + w, y + h, x, y + h, r2);
+      ctx.arcTo(x, y + h, x, y, r2);
+      ctx.arcTo(x, y, x + w, y, r2);
+      ctx.closePath();
+    }
+
+    var url = cv.toDataURL("image/png");
+    $("cardImg").src = url;
+    var fname = "绩点推演_" + (r.gpa == null ? "未录入" : fmt(r.gpa, 2)) + ".png";
+    $("cardDl").href = url;
+    $("cardDl").download = fname;
+    $("cardModal").classList.add("on");
+  });
+
+  $("cardClose").addEventListener("click", function(){
+    $("cardModal").classList.remove("on");
+  });
+  $("cardModal").addEventListener("click", function(e){
+    if (e.target === this) this.classList.remove("on");
+  });
+
+  /* ---------- 初始化 ---------- */
+  load();
+  if (state.scale !== "4.0"){
+    Array.prototype.forEach.call($("seg").children, function(x){
+      x.classList.toggle("on", x.dataset.s === state.scale);
+    });
+  }
+  $("target").value = state.target;
+  $("remain").value = state.remain;
+  $("simRange").value = state.sim;
+  paintChips();
+  renderCourses();
+  render();
+})();
+</script>
+</body>
+</html>
