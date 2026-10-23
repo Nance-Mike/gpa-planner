@@ -6,9 +6,9 @@
 
   结构索引
     <style>  设计变量 → 基础布局 → 组件（推演面板 / 输入 / 进度条 / 课程表 / 滑块 / 弹窗）
-    <body>   Header → 推演面板（现状 + 目标 + 结论）→ 情景模拟 → 课程录入 → 使用说明
-    <script> 换算 scoreToPoint / pointToScore → 计算 compute → 渲染 render
-             → 事件绑定 → 本地存储 → Canvas 分享卡
+    <body>   Header → 推演面板（口径 + 现状 + 目标 + 结论）→ 情景模拟 → 课程录入 → 使用说明
+    <script> 换算 parseScore / scoreToPoint / pointToScore → 计算 compute（含口径与类型过滤）
+             → 渲染 render → 事件与快捷键 → 存储与备份 → Canvas 分享卡
 
   核心公式
     加权绩点 = Σ(学分 × 单科绩点) ÷ Σ学分
@@ -19,8 +19,10 @@
     4.0 制：分档换算（90→4.0，85→3.7，82→3.3，78→3.0，75→2.7，72→2.3，68→2.0，64→1.5，60→1.0）
     5.0 制：线性换算，绩点 =（成绩 − 50）÷ 10，60 分起算
     百分制：直接使用加权平均分
+    等级制：优秀 95 / 良好 85 / 中等 75 / 及格 65 / 不及格 50，以及 A—F 字母等级，均按中值估算
 
-  数据：仅写入浏览器 localStorage（键名 gpa-planner-v1），不上传任何服务器。
+  数据：仅写入浏览器 localStorage（键名 gpa-planner-data），支持 JSON 备份导入导出；
+        旧键 gpa-planner-v1 的数据会在首次加载时自动迁移。
 -->
 <html lang="zh-CN">
 <head>
@@ -136,7 +138,7 @@
   .v-note b{color:var(--ink);font-weight:700}
 
   /* ---------- bar ---------- */
-  .bar-wrap{margin-top:16px}
+  .bar-wrap{margin-top:30px}
   .bar{position:relative;height:8px;border-radius:99px;background:#EDF1F6;overflow:visible}
   .bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,#2E9BC4,#123A5F);transition:width .35s cubic-bezier(.2,.8,.2,1)}
   .bar-tick{position:absolute;top:-4px;width:2px;height:16px;background:#0E1B2C;border-radius:2px;transition:left .35s}
@@ -146,26 +148,60 @@
   }
   .bar-scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink3);margin-top:7px}
 
+  /* ---------- scope ---------- */
+  .scope-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .scope-label{font-size:11.5px;color:var(--ink3);font-weight:600;white-space:nowrap}
+  .seg-sm{padding:2px}
+  .seg-sm button{font-size:11.5px;padding:5px 10px}
+
   /* ---------- course table ---------- */
-  .cr-head,.cr{display:grid;grid-template-columns:1fr 72px 72px 30px;gap:8px;align-items:center}
+  .cr-head{display:grid;grid-template-columns:1fr 70px 78px 30px;gap:8px;align-items:center}
   .cr-head{font-size:11.5px;color:var(--ink3);font-weight:600;padding:0 2px 8px}
   .cr-head span:nth-child(2),.cr-head span:nth-child(3){text-align:center}
-  .cr{margin-bottom:8px}
+  .cr{margin-bottom:10px;padding-bottom:10px;border-bottom:1px dashed #EDF1F7}
+  .cr:last-child{border-bottom:0;padding-bottom:0;margin-bottom:0}
+  .cr-top{display:grid;grid-template-columns:1fr 70px 78px 30px;gap:8px;align-items:center}
   .cr input{
     border:1px solid var(--line);background:#FBFCFE;border-radius:9px;padding:9px 10px;
     font-size:14px;font-family:inherit;outline:none;width:100%;color:var(--ink);transition:.15s;
   }
   .cr input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px rgba(46,155,196,.1)}
   .cr input.c{text-align:center;font-weight:700}
+  .cr.bad input{border-color:#E3A6A6;background:#FDF7F7}
   .cr .del{
     border:0;background:transparent;color:var(--ink3);font-size:17px;cursor:pointer;
     border-radius:8px;height:34px;line-height:1;font-family:inherit;
   }
   .cr .del:hover{background:var(--bad-soft);color:var(--bad)}
+  .cr-bot{display:flex;align-items:center;gap:9px;margin-top:7px}
+  .cr select{
+    border:1px solid var(--line);background:#FBFCFE;border-radius:8px;padding:5px 6px;
+    font-size:12px;font-family:inherit;color:var(--ink2);outline:none;cursor:pointer;max-width:118px;
+  }
+  .cr select:focus{border-color:var(--accent);background:#fff}
+  .gauge{flex:1;max-width:220px;height:5px;border-radius:99px;background:#EDF1F6;overflow:hidden;min-width:32px}
+  .gauge i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#2E9BC4,#123A5F)}
+  .gauge.lv-warn i{background:linear-gradient(90deg,#E8A33D,#C2740A)}
+  .gauge.lv-bad i{background:linear-gradient(90deg,#E06C6C,#C93B3B)}
+  .gauge-num{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
+  .est{font-size:10.5px;color:var(--accent);font-weight:700}
   .empty{
     text-align:center;color:var(--ink3);font-size:13px;padding:22px 10px;
     border:1px dashed var(--line);border-radius:12px;background:#FBFCFE;
   }
+  .data-warn{
+    display:none;margin-top:12px;font-size:12.5px;line-height:1.55;color:var(--warn);
+    background:var(--warn-soft);border:1px solid #F2E0C2;border-radius:10px;padding:8px 11px;
+  }
+  .data-warn.on{display:block}
+  .data-warn b{font-weight:700}
+  .linkbar{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+  .linkbar button{
+    border:0;background:none;padding:0;font-family:inherit;font-size:12px;font-weight:600;
+    color:var(--ink2);cursor:pointer;text-decoration:underline;text-underline-offset:3px;
+    text-decoration-color:#CBD6E3;
+  }
+  .linkbar button:hover{color:var(--brand)}
   .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
   .btn{
     border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:10px;
@@ -222,6 +258,13 @@
     max-width:86vw;text-align:center;
   }
   .toast.on{opacity:1;transform:translate(-50%,0)}
+  .toast.act{display:flex;align-items:center;gap:14px;padding:8px 10px 8px 16px;text-align:left}
+  .toast.on.act{pointer-events:auto}
+  .toast .undo{
+    border:0;background:rgba(255,255,255,.16);color:#fff;font-size:12.5px;font-weight:700;
+    padding:6px 12px;border-radius:999px;cursor:pointer;font-family:inherit;white-space:nowrap;
+  }
+  .toast .undo:hover{background:rgba(255,255,255,.28)}
 
   /* ---------- modal ---------- */
   .modal{position:fixed;inset:0;background:rgba(14,27,44,.45);display:none;align-items:center;justify-content:center;z-index:100;padding:18px}
@@ -241,7 +284,9 @@
     .row{grid-template-columns:1fr;gap:16px}
     .snap .v{font-size:19px}
     .v-big{font-size:32px}
-    .cr-head,.cr{grid-template-columns:1fr 62px 62px 28px;gap:6px}
+    .cr-head,.cr-top{grid-template-columns:1fr 60px 66px 28px;gap:6px}
+    .cr input{padding:9px 7px;font-size:13.5px}
+    .cr select{max-width:104px}
   }
 </style>
 </head>
@@ -262,6 +307,14 @@
         <button data-s="4.0" class="on">4.0 制</button>
         <button data-s="5.0">5.0 制</button>
         <button data-s="100">百分制</button>
+      </div>
+    </div>
+
+    <div class="scope-row">
+      <span class="scope-label">统计口径</span>
+      <div class="seg seg-sm" id="scopeSeg">
+        <button data-scope="all" class="on">全部课程</button>
+        <button data-scope="required">仅必修</button>
       </div>
     </div>
 
@@ -346,12 +399,19 @@
       <span>课程名称</span><span>学分</span><span>成绩</span><span></span>
     </div>
     <div id="courseList"></div>
+    <div class="data-warn" id="dataWarn"></div>
     <div class="actions">
       <button class="btn primary" id="addCourse">+ 添加课程</button>
       <button class="btn" id="batchBtn">批量粘贴</button>
       <button class="btn ghost" id="demoBtn">填入示例</button>
       <button class="btn ghost" id="clearBtn">清空</button>
     </div>
+    <div class="linkbar">
+      <button id="exportJson">导出备份</button>
+      <button id="importJson">导入备份</button>
+      <button id="exportCsv">导出 CSV</button>
+    </div>
+    <input type="file" id="fileInput" accept=".json,application/json" style="display:none" />
   </section>
 
   <!-- ===== 说明 ===== -->
@@ -361,16 +421,32 @@
       <h4>怎么用</h4>
       <ol>
         <li>先选<b>绩点制式</b>，与学校教务系统一致即可（4.0 制 / 5.0 制 / 百分制）。</li>
-        <li>在「已修课程」里逐门录入学分与成绩；也可点「批量粘贴」，一行一门，格式为 <code>课程名 学分 成绩</code>。</li>
+        <li>选<b>统计口径</b>：全部课程，或只看必修课（部分学校保研只认必修）。</li>
+        <li>在「已修课程」里逐门录入学分与成绩，并选择课程类型；也可点「批量粘贴」，一行一门，格式为 <code>课程名 学分 成绩 [类型]</code>。</li>
         <li>在上方填写<b>目标绩点</b>与<b>剩余学分</b>，页面即刻算出剩余课程需要达到的平均水平。</li>
         <li>拖动情景模拟滑块，可以看不同发挥下的最终结果。</li>
-        <li>点「生成分享卡」可保存一张结果图，方便留存或分享。</li>
+        <li>点「生成分享卡」保存结果图；数据攒得多时，建议顺手「导出备份」。</li>
       </ol>
+
+      <h4>成绩怎么填</h4>
+      <ul>
+        <li>直接填分数即可，如 <code>88</code>、<code>86.5</code>。</li>
+        <li>也可以填等级：优秀 / 良好 / 中等 / 及格 / 不及格，或 A、A−、B+、B、C+、C 等字母等级。</li>
+        <li>等级按常见中值折算（优秀 95、良好 85、中等 75、及格 65、不及格 50），折算值在行尾以 <b>≈</b> 标注，属于估算。</li>
+      </ul>
+
+      <h4>课程类型</h4>
+      <ul>
+        <li><b>必修 / 选修 / 通识</b>：用于区分统计口径，选「仅必修」时只统计必修课。</li>
+        <li><b>不计入绩点</b>：如体育、军事理论等通过制课程，学分照算，但不进入绩点与平均分的分母。</li>
+      </ul>
+
       <h4>计算口径</h4>
       <ul>
         <li>加权绩点 = Σ(学分 × 单科绩点) ÷ Σ学分；加权平均分同理按百分制成绩计算。</li>
         <li>剩余所需绩点 = [目标 × (已修学分 + 剩余学分) − 当前绩点 × 已修学分] ÷ 剩余学分。</li>
         <li>若该结果超过当前制式的满分，说明即便剩余课程全部满绩也无法达成目标，页面会给出可达上限。</li>
+        <li>「已修学分」按当前口径统计全部有效课程；加权只取其中计入绩点的部分。</li>
       </ul>
       <h4>成绩换算为绩点</h4>
       <table class="tbl">
@@ -387,7 +463,15 @@
       </table>
       <p style="margin-top:8px">各校换算细则略有差异，本工具采用最常见的分档口径（4.0 制）与线性口径（5.0 制：绩点 =（成绩 − 50）÷ 10）。若学校另有规定，以教务系统为准。</p>
       <p>需要注意：4.0 制是<b>分档换算</b>，档位之间不连续，所以「剩余课程平均需达到 3.72」在操作层面等同于「多数课程要考进 90 分档」——页面给出的「约 X 分档」就是这个含义。5.0 制与百分制为连续换算，不存在这个跳跃。</p>
-      <p>所有数据仅保存在你自己的浏览器本地，不会上传。</p>
+
+      <h4>数据与备份</h4>
+      <ul>
+        <li>所有数据只存在你自己的浏览器里，不上传服务器，也不需要登录。</li>
+        <li><b>导出备份</b>：下载一个 JSON 文件，换设备或清理浏览器后可以恢复。</li>
+        <li><b>导入备份</b>：选择之前导出的 JSON，会覆盖当前数据；旧版本导出的文件也能自动兼容。</li>
+        <li><b>导出 CSV</b>：导出课程表，方便在 Excel 里二次整理。</li>
+        <li>删除单门课程或清空列表后，提示条上有「撤销」，也可以直接按 <code>Ctrl/Cmd + Z</code>；在最后一门课的输入框按回车可快速新增一行。</li>
+      </ul>
     </div>
   </details>
 
@@ -416,8 +500,8 @@
 <div class="modal" id="batchModal">
   <div class="modal-box">
     <h3>批量粘贴课程</h3>
-    <p>每行一门，格式：<b>课程名 学分 成绩</b>，用空格、逗号或制表符分隔。只填「学分 成绩」也可以。</p>
-    <textarea id="batchText" placeholder="高等数学A 5 88&#10;大学物理 4 85&#10;电路分析基础 3.5 82&#10;3 91"></textarea>
+    <p>每行一门，格式：<b>课程名 学分 成绩 类型</b>，用空格、逗号或制表符分隔。成绩可填分数或等级；类型可省略，默认按必修处理。</p>
+    <textarea id="batchText" placeholder="高等数学A 5 88 必修&#10;大学物理 4 85&#10;大学英语 3 良好 通识&#10;体育 1 通过 不计入绩点&#10;3 91"></textarea>
     <div class="modal-foot">
       <button class="btn ghost" id="batchCancel">取消</button>
       <button class="btn primary" id="batchOk">导入</button>
@@ -429,7 +513,9 @@
 (function(){
   "use strict";
 
-  var KEY = "gpa-planner-v1";
+  var KEY = "gpa-planner-data";        // 当前存储键
+  var LEGACY_KEY = "gpa-planner-v1";   // v1 旧键，首次加载时迁移
+  var SCHEMA_VERSION = 2;
   var SCALES = {
     "4.0": {max:4.0, step:0.01, unit:"", name:"4.0 制"},
     "5.0": {max:5.0, step:0.01, unit:"", name:"5.0 制"},
@@ -437,7 +523,9 @@
   };
 
   var state = {
+    version: SCHEMA_VERSION,
     scale: "4.0",
+    scope: "all",          // all | required，统计口径
     courses: [],
     target: 3.8,
     remain: 18,
@@ -447,6 +535,40 @@
   var $ = function(id){ return document.getElementById(id); };
 
   /* ---------- 换算 ---------- */
+
+  // 等级制成绩 → 等效百分制分数。
+  // 各校口径不同，这里取常见中值，仅用于估算，界面会标注"估"。
+  var LEVEL_MAP = {
+    "优秀":95, "优":95, "良好":85, "良":85, "中等":75, "中":75,
+    "及格":65, "合格":65, "不及格":50, "不合格":50, "通过":75, "不通过":50,
+    "A+":97, "A":95, "A-":90,
+    "B+":87, "B":85, "B-":82,
+    "C+":79, "C":75, "C-":72,
+    "D+":68, "D":65, "D-":62,
+    "F":50, "P":75, "NP":50
+  };
+
+  /**
+   * 解析用户输入的成绩。
+   * 返回 { state, score, estimated }
+   *   state: ok | empty | range | invalid
+   *   range: 数值超出 0—100，score 返回夹取后的值
+   */
+  function parseScore(raw){
+    var s = String(raw == null ? "" : raw).trim();
+    if (!s) return { state:"empty" };
+    if (/^-?\d+(\.\d+)?$/.test(s)){
+      var n = Number(s);
+      if (n < 0 || n > 100) return { state:"range", score: clamp(n, 0, 100) };
+      return { state:"ok", score:n, estimated:false };
+    }
+    var key = s.toUpperCase().replace(/\s+/g, "");
+    if (LEVEL_MAP.hasOwnProperty(key)){
+      return { state:"ok", score:LEVEL_MAP[key], estimated:true };
+    }
+    return { state:"invalid" };
+  }
+
   function scoreToPoint(score, scale){
     if (scale === "100") return clamp(score, 0, 100);
     if (scale === "5.0") return score >= 60 ? Math.min(5, (score - 50) / 10) : 0;
@@ -490,17 +612,27 @@
   function compute(){
     var scale = state.scale;
     var max = SCALES[scale].max;
-    var C1 = 0, sumP = 0, sumS = 0, valid = 0;
+    // C1 为加权分母（参与绩点计算的学分），scopeCredit 为当前口径下的总学分
+    var C1 = 0, sumP = 0, sumS = 0, valid = 0, counted = 0;
+    var scopeCredit = 0, invalidN = 0, estimatedN = 0, excludedN = 0;
 
     state.courses.forEach(function(c){
       var cr = parseFloat(c.credit);
-      var sc = parseFloat(c.score);
-      if (!(cr > 0) || isNaN(sc)) return;
-      sc = clamp(sc, 0, 100);
-      C1 += cr;
-      sumS += cr * sc;
-      sumP += cr * scoreToPoint(sc, scale);
+      var ps = parseScore(c.score);
+      var touched = String(c.name || "").trim() || String(c.credit || "").trim() || String(c.score || "").trim();
+      if (!touched) return;                                   // 完全空行忽略，不计为错误
+      if (!(cr > 0) || ps.state !== "ok"){ invalidN++; return; } // 学分缺失或成绩无法解析
+
       valid++;
+      if (ps.estimated) estimatedN++;
+      if (state.scope === "required" && c.type !== "required") return; // 口径过滤
+      scopeCredit += cr;
+      if (c.type === "excluded"){ excludedN++; return; }      // 计入学分，不计入绩点
+
+      C1 += cr;
+      sumS += cr * ps.score;
+      sumP += cr * scoreToPoint(ps.score, scale);
+      counted++;
     });
 
     var gpa = C1 > 0 ? sumP / C1 : null;
@@ -562,11 +694,20 @@
       note = "填写目标" + (isScore ? "平均分" : "绩点") + "后即可反推剩余课程需要达到的水平。";
     }
 
+    // 选了「仅必修」但一门必修都没标记时，反推没有意义，直接给出引导
+    if (state.scope === "required" && valid > 0 && counted === 0 && excludedN === 0){
+      need = null;
+      needScore = null;
+      verdict = "idle";
+      note = "当前统计口径是「仅必修」，但课程里还没有标记为必修的。在下方每门课的类型里选「必修」，或把口径切回「全部课程」。";
+    }
+
     return {
-      scale:scale, max:max, credit:C1, gpa:gpa, avgScore:avgScore,
+      scale:scale, max:max, credit:C1, scopeCredit:scopeCredit, gpa:gpa, avgScore:avgScore,
       remain:C2, target:hasTarget ? target : null,
       need:need, needScore:needScore, maxFinal:maxFinal,
-      verdict:verdict, note:note, validCount:valid
+      verdict:verdict, note:note, validCount:valid, counted:counted,
+      invalidN:invalidN, estimatedN:estimatedN, excludedN:excludedN
     };
   }
 
@@ -587,7 +728,7 @@
       $("curScore").textContent = (r.avgScore == null) ? "—" : fmt(r.avgScore, 1);
       $("curScoreLabel").textContent = "加权平均分";
     }
-    $("curCredit").textContent = fmt(r.credit, r.credit % 1 === 0 ? 0 : 1);
+    $("curCredit").textContent = fmt(r.scopeCredit, r.scopeCredit % 1 === 0 ? 0 : 1);
 
     $("targetLabel").textContent = state.scale === "100" ? "目标加权平均分" : "目标绩点";
     $("needLabel").textContent = state.scale === "100" ? "剩余课程需要平均达到" : "剩余课程需要平均达到";
@@ -632,8 +773,23 @@
       $("barTick").setAttribute("data-l", "目标");
     }
 
-    // 课程数
-    $("courseCount").textContent = r.validCount + " 门";
+    // 课程数与数据质量提示
+    var cc = r.validCount + " 门";
+    if (state.scope === "required") cc += " · 必修 " + r.counted + " 门";
+    $("courseCount").textContent = cc;
+
+    var warns = [];
+    if (r.invalidN) warns.push("<b>" + r.invalidN + " 门</b>数据不完整（缺学分或成绩无法识别），未计入统计");
+    if (r.estimatedN) warns.push("<b>" + r.estimatedN + " 门</b>为等级制成绩，按等级中值估算");
+    if (r.excludedN) warns.push("<b>" + r.excludedN + " 门</b>标记为不计入绩点，仅计学分");
+    var dw = $("dataWarn");
+    if (warns.length){
+      dw.innerHTML = warns.join("；") + "。";
+      dw.classList.add("on");
+    } else {
+      dw.innerHTML = "";
+      dw.classList.remove("on");
+    }
 
     // 模拟
     var simPoint = scoreToPoint(state.sim, state.scale);
@@ -662,22 +818,77 @@
   }
 
   /* ---------- 课程表 ---------- */
+  var TYPE_OPTIONS = [
+    ["required", "必修"],
+    ["elective", "选修"],
+    ["general", "通识"],
+    ["excluded", "不计入绩点"]
+  ];
+
+  function typeOptions(selected){
+    return TYPE_OPTIONS.map(function(o){
+      return '<option value="' + o[0] + '"' + (o[0] === selected ? " selected" : "") + ">" + o[1] + "</option>";
+    }).join("");
+  }
+
+  function courseTouched(c){
+    return String(c.name || "").trim() || String(c.credit || "").trim() || String(c.score || "").trim();
+  }
+
+  function isCourseBad(c){
+    return courseTouched(c) && (!(parseFloat(c.credit) > 0) || parseScore(c.score).state !== "ok");
+  }
+
+  function gaugeOf(c){
+    var ps = parseScore(c.score);
+    if (ps.state !== "ok" && ps.state !== "range") return { cls:"", width:0, mark:"" };
+    var v = ps.score;
+    return {
+      cls: v >= 75 ? "" : (v >= 60 ? " lv-warn" : " lv-bad"),
+      width: clamp((v - 50) / 50 * 100, 3, 100),
+      mark: ps.estimated ? "≈" + v : ""
+    };
+  }
+
   function renderCourses(){
     var list = $("courseList");
     if (!state.courses.length){
-      list.innerHTML = '<div class="empty">还没有课程。点「添加课程」逐门录入，或「填入示例」先看看效果。</div>';
+      list.innerHTML = '<div class="empty">还没有课程。点「添加课程」逐门录入，或「填入示例」先看看效果。<br />' +
+        '成绩可以直接填分数（如 88），也可以填等级（优秀 / 良好 / 中等 / 及格，或 A、B+、C-）。</div>';
       return;
     }
     var html = "";
     state.courses.forEach(function(c, i){
-      html += '<div class="cr">' +
-        '<input data-i="' + i + '" data-f="name" value="' + escAttr(c.name) + '" placeholder="课程名" />' +
-        '<input class="c" data-i="' + i + '" data-f="credit" value="' + escAttr(c.credit) + '" inputmode="decimal" placeholder="学分" />' +
-        '<input class="c" data-i="' + i + '" data-f="score" value="' + escAttr(c.score) + '" inputmode="decimal" placeholder="成绩" />' +
-        '<button class="del" data-i="' + i + '" title="删除">✕</button>' +
-      '</div>';
+      var g = gaugeOf(c);
+      html += '<div class="cr' + (isCourseBad(c) ? " bad" : "") + '">' +
+        '<div class="cr-top">' +
+          '<input data-i="' + i + '" data-f="name" value="' + escAttr(c.name) + '" placeholder="课程名" />' +
+          '<input class="c" data-i="' + i + '" data-f="credit" value="' + escAttr(c.credit) + '" inputmode="decimal" placeholder="学分" />' +
+          '<input class="c" data-i="' + i + '" data-f="score" value="' + escAttr(c.score) + '" placeholder="分数/等级" />' +
+          '<button class="del" data-i="' + i + '" title="删除这门课">✕</button>' +
+        "</div>" +
+        '<div class="cr-bot">' +
+          '<select data-i="' + i + '" data-f="type" aria-label="课程类型">' + typeOptions(c.type || "required") + "</select>" +
+          '<div class="gauge' + g.cls + '"><i style="width:' + g.width + '%"></i></div>' +
+          '<span class="gauge-num num">' + g.mark + "</span>" +
+        "</div>" +
+      "</div>";
     });
     list.innerHTML = html;
+  }
+
+  // 输入过程中只更新行内状态，不重绘整行，避免光标跳动
+  function syncCourseRow(row, c){
+    if (!row) return;
+    row.classList.toggle("bad", !!isCourseBad(c));
+    var g = gaugeOf(c);
+    var bar = row.querySelector(".gauge");
+    var num = row.querySelector(".gauge-num");
+    if (bar){
+      bar.className = "gauge" + g.cls;
+      bar.firstChild.style.width = g.width + "%";
+    }
+    if (num) num.textContent = g.mark;
   }
 
   function escAttr(v){
@@ -687,46 +898,80 @@
   /* ---------- 事件 ---------- */
   $("courseList").addEventListener("input", function(e){
     var el = e.target;
-    if (el.tagName !== "INPUT") return;
+    if (el.tagName !== "INPUT" || !el.dataset.f) return;
     var i = +el.dataset.i, f = el.dataset.f;
     if (!state.courses[i]) return;
     state.courses[i][f] = el.value;
+    syncCourseRow(el.closest(".cr"), state.courses[i]);
     render();
   });
+
+  $("courseList").addEventListener("change", function(e){
+    var el = e.target;
+    if (el.tagName !== "SELECT" || !el.dataset.f) return;
+    var i = +el.dataset.i;
+    if (!state.courses[i]) return;
+    state.courses[i][el.dataset.f] = el.value;
+    render();
+  });
+
+  // 删除后可撤销
+  var lastRemoved = null;
 
   $("courseList").addEventListener("click", function(e){
     if (!e.target.classList.contains("del")) return;
     var i = +e.target.dataset.i;
-    state.courses.splice(i, 1);
+    var removed = state.courses.splice(i, 1)[0];
+    if (!removed) return;
+    lastRemoved = { course:removed, index:i };
     renderCourses();
     render();
+    toast("已删除「" + (String(removed.name || "").trim() || "未命名课程") + "」", "撤销", function(){
+      if (!lastRemoved) return;
+      state.courses.splice(Math.min(lastRemoved.index, state.courses.length), 0, lastRemoved.course);
+      lastRemoved = null;
+      renderCourses();
+      render();
+    });
   });
 
-  $("addCourse").addEventListener("click", function(){
-    state.courses.push({name:"", credit:"", score:""});
-    renderCourses();
-    render();
+  function focusLastCourse(){
     var rows = $("courseList").querySelectorAll(".cr");
     var last = rows[rows.length - 1];
-    if (last) last.querySelector("input").focus();
+    if (!last) return;
+    var first = last.querySelector("input");
+    if (first) first.focus();
+  }
+
+  $("addCourse").addEventListener("click", function(){
+    state.courses.push({ name:"", credit:"", score:"", type:"required" });
+    renderCourses();
+    render();
+    focusLastCourse();
   });
 
   $("clearBtn").addEventListener("click", function(){
     if (!state.courses.length){ toast("已经是空的"); return; }
+    var backup = state.courses.slice();
     state.courses = [];
     renderCourses();
     render();
-    toast("已清空课程");
+    toast("已清空 " + backup.length + " 门课程", "撤销", function(){
+      state.courses = backup;
+      renderCourses();
+      render();
+    });
   });
 
   $("demoBtn").addEventListener("click", function(){
     state.courses = [
-      {name:"高等数学 A(1)", credit:"5", score:"88"},
-      {name:"线性代数", credit:"3", score:"84"},
-      {name:"大学物理 B", credit:"4", score:"81"},
-      {name:"电路分析基础", credit:"3.5", score:"86"},
-      {name:"程序设计基础", credit:"3", score:"92"},
-      {name:"大学英语(3)", credit:"2", score:"79"}
+      {name:"高等数学 A(1)", credit:"5", score:"88", type:"required"},
+      {name:"线性代数", credit:"3", score:"84", type:"required"},
+      {name:"大学物理 B", credit:"4", score:"81", type:"required"},
+      {name:"电路分析基础", credit:"3.5", score:"86", type:"required"},
+      {name:"程序设计基础", credit:"3", score:"92", type:"required"},
+      {name:"大学英语(3)", credit:"2", score:"良好", type:"general"},
+      {name:"体育(3)", credit:"1", score:"通过", type:"excluded"}
     ];
     state.remain = 20;
     if (state.scale === "4.0") state.target = 3.6;
@@ -738,6 +983,19 @@
     render();
     paintChips();
     toast("已填入示例数据");
+  });
+
+  // 统计口径切换
+  $("scopeSeg").addEventListener("click", function(e){
+    var b = e.target.closest("button");
+    if (!b) return;
+    var s = b.dataset.scope;
+    if (s === state.scope) return;
+    state.scope = s;
+    Array.prototype.forEach.call($("scopeSeg").children, function(x){
+      x.classList.toggle("on", x.dataset.scope === s);
+    });
+    render();
   });
 
   // 制式切换
@@ -812,62 +1070,280 @@
   $("batchModal").addEventListener("click", function(e){
     if (e.target === this) this.classList.remove("on");
   });
+  // 批量粘贴的类型别名
+  var TYPE_ALIAS = {
+    "必修":"required", "选修":"elective", "通识":"general",
+    "公选":"elective", "不计入":"excluded", "不计入绩点":"excluded"
+  };
+
+  /** 解析单行：课程名 学分 成绩 [类型]，成绩支持分数与等级 */
+  function parseCourseLine(line, fallbackIndex){
+    var parts = line.split(/[\s,，\t]+/).filter(Boolean);
+    if (parts.length < 2) return null;
+
+    var type = "required";
+    var tail = parts[parts.length - 1];
+    if (TYPE_ALIAS[tail]){
+      type = TYPE_ALIAS[tail];
+      parts.pop();
+    }
+    if (parts.length < 2) return null;
+
+    var scoreRaw = parts.pop();
+    var creditRaw = parts.pop();
+    if (!(parseFloat(creditRaw) > 0)) return null;
+
+    var ps = parseScore(scoreRaw);
+    if (ps.state !== "ok" && ps.state !== "range") return null;
+
+    return {
+      name: parts.join(" ") || ("课程 " + fallbackIndex),
+      credit: creditRaw,
+      score: scoreRaw,
+      type: type
+    };
+  }
+
   $("batchOk").addEventListener("click", function(){
     var raw = $("batchText").value || "";
-    var lines = raw.split(/\r?\n/);
-    var added = 0;
-    lines.forEach(function(line){
+    var added = 0, skipped = 0;
+
+    raw.split(/\r?\n/).forEach(function(line){
       line = line.trim();
       if (!line) return;
-      var parts = line.split(/[\s,，\t]+/).filter(Boolean);
-      if (parts.length < 2) return;
-      var score = parts[parts.length - 1];
-      var credit = parts[parts.length - 2];
-      var name = parts.slice(0, parts.length - 2).join(" ");
-      if (isNaN(parseFloat(score)) || isNaN(parseFloat(credit))) return;
-      state.courses.push({
-        name: name || ("课程 " + (state.courses.length + 1)),
-        credit: credit, score: score
-      });
+      var course = parseCourseLine(line, state.courses.length + 1);
+      if (!course){ skipped++; return; }
+      state.courses.push(course);
       added++;
     });
+
     $("batchModal").classList.remove("on");
     $("batchText").value = "";
     renderCourses();
     render();
-    toast(added ? ("已导入 " + added + " 门课程") : "没有识别到有效行，请检查格式");
+
+    if (!added){
+      toast("没有识别到有效行，请检查格式");
+    } else if (skipped){
+      toast("已导入 " + added + " 门，" + skipped + " 行格式不符已跳过");
+    } else {
+      toast("已导入 " + added + " 门课程");
+    }
   });
 
-  /* ---------- 保存 ---------- */
+  /* ---------- 存储 ---------- */
+
+  // 补齐缺省字段：兼容 v1 数据与外部导入的文件
+  function normalizeCourse(c){
+    c = c || {};
+    return {
+      name: String(c.name == null ? "" : c.name),
+      credit: String(c.credit == null ? "" : c.credit),
+      score: String(c.score == null ? "" : c.score),
+      type: ["required", "elective", "general", "excluded"].indexOf(c.type) >= 0 ? c.type : "required"
+    };
+  }
+
+  function normalizeState(d){
+    d = (d && typeof d === "object") ? d : {};
+    var s = {
+      version: SCHEMA_VERSION,
+      scale: ["4.0", "5.0", "100"].indexOf(d.scale) >= 0 ? d.scale : "4.0",
+      scope: d.scope === "required" ? "required" : "all",
+      courses: Array.isArray(d.courses) ? d.courses.map(normalizeCourse) : [],
+      target: (typeof d.target === "number" && isFinite(d.target)) ? d.target : 3.8,
+      remain: (typeof d.remain === "number" && isFinite(d.remain)) ? d.remain : 18,
+      sim: (typeof d.sim === "number" && isFinite(d.sim)) ? d.sim : 85
+    };
+    return s;
+  }
+
+  function applyState(s){
+    state.version = SCHEMA_VERSION;
+    state.scale = s.scale;
+    state.scope = s.scope;
+    state.courses = s.courses;
+    state.target = s.target;
+    state.remain = s.remain;
+    state.sim = s.sim;
+  }
+
   function save(){
     try{
       localStorage.setItem(KEY, JSON.stringify(state));
-    }catch(e){}
+    }catch(e){
+      // 存储不可用（隐私模式、沙箱限制）时静默降级，功能不受影响
+    }
   }
+
   function load(){
+    var raw = null;
     try{
-      var raw = localStorage.getItem(KEY);
+      raw = localStorage.getItem(KEY);
+      if (!raw) raw = localStorage.getItem(LEGACY_KEY);   // 从 v1 键迁移
       if (!raw) return;
-      var d = JSON.parse(raw);
-      if (d && typeof d === "object"){
-        state.scale = d.scale || "4.0";
-        state.courses = Array.isArray(d.courses) ? d.courses : [];
-        state.target = typeof d.target === "number" ? d.target : 3.8;
-        state.remain = typeof d.remain === "number" ? d.remain : 18;
-        state.sim = typeof d.sim === "number" ? d.sim : 85;
-      }
+      applyState(normalizeState(JSON.parse(raw)));
+      save();                                             // 迁移后立即写回新键
     }catch(e){}
   }
 
-  /* ---------- toast ---------- */
+  /* ---------- 提示条 ---------- */
   var toastTimer;
-  function toast(msg){
+
+  function hideToast(){
     var t = $("toast");
-    t.textContent = msg;
-    t.classList.add("on");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ t.classList.remove("on"); }, 1800);
+    t.className = "toast";
+    t.innerHTML = "";
   }
+
+  /**
+   * 轻提示。传入 actionLabel 与 action 时渲染可点击的撤销按钮，
+   * 停留在屏幕上的时间也相应延长。
+   */
+  function toast(msg, actionLabel, action){
+    var t = $("toast");
+    clearTimeout(toastTimer);
+
+    if (actionLabel && typeof action === "function"){
+      t.className = "toast act on";
+      t.innerHTML = "";
+      var span = document.createElement("span");
+      span.textContent = msg;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "undo";
+      btn.textContent = actionLabel;
+      btn.addEventListener("click", function(){
+        hideToast();
+        action();
+      });
+      t.appendChild(span);
+      t.appendChild(btn);
+      toastTimer = setTimeout(hideToast, 5200);
+    } else {
+      t.className = "toast on";
+      t.textContent = msg;
+      toastTimer = setTimeout(hideToast, 1800);
+    }
+  }
+
+  /* ---------- 数据备份 ---------- */
+  function download(filename, content, mime){
+    var blob = new Blob([content], { type: mime || "application/octet-stream" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function stamp(){
+    var d = new Date();
+    var p = function(n){ return n < 10 ? "0" + n : "" + n; };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  var TYPE_NAME = { required:"必修", elective:"选修", general:"通识", excluded:"不计入绩点" };
+
+  $("exportJson").addEventListener("click", function(){
+    var payload = {
+      app: "gpa-planner",
+      version: SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: {
+        scale: state.scale,
+        scope: state.scope,
+        courses: state.courses,
+        target: state.target,
+        remain: state.remain,
+        sim: state.sim
+      }
+    };
+    download("绩点推演器-备份-" + stamp() + ".json", JSON.stringify(payload, null, 2), "application/json");
+    toast("备份文件已导出");
+  });
+
+  $("importJson").addEventListener("click", function(){
+    $("fileInput").value = "";
+    $("fileInput").click();
+  });
+
+  $("fileInput").addEventListener("change", function(){
+    var file = this.files && this.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try{
+        var raw = JSON.parse(String(reader.result));
+        var d = (raw && raw.data && typeof raw.data === "object") ? raw.data : raw;
+        if (!d || !Array.isArray(d.courses)) throw new Error("missing courses");
+        var s = normalizeState(d);
+        applyState(s);
+        syncControls();
+        renderCourses();
+        render();
+        toast("已导入 " + s.courses.length + " 门课程");
+      }catch(e){
+        toast("导入失败：文件格式不正确");
+      }
+    };
+    reader.onerror = function(){ toast("导入失败：无法读取文件"); };
+    reader.readAsText(file, "utf-8");
+  });
+
+  $("exportCsv").addEventListener("click", function(){
+    if (!state.courses.length){ toast("还没有课程可以导出"); return; }
+    var rows = [["课程名", "学分", "成绩输入", "等效分", "课程类型"]];
+    state.courses.forEach(function(c){
+      var ps = parseScore(c.score);
+      rows.push([
+        c.name || "",
+        c.credit || "",
+        c.score || "",
+        ps.state === "ok" ? String(ps.score) : "",
+        TYPE_NAME[c.type] || "必修"
+      ]);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(v){
+        var s = String(v).replace(/"/g, '""');
+        return /[",\n]/.test(s) ? '"' + s + '"' : s;
+      }).join(",");
+    }).join("\r\n");
+    download("绩点推演器-课程表-" + stamp() + ".csv", "\ufeff" + csv, "text/csv;charset=utf-8");
+    toast("课程表已导出为 CSV");
+  });
+
+  /* ---------- 快捷键 ---------- */
+  document.addEventListener("keydown", function(e){
+    var mod = e.metaKey || e.ctrlKey;
+
+    // 撤销最近一次删除
+    if (mod && !e.shiftKey && String(e.key).toLowerCase() === "z"){
+      if (!lastRemoved) return;
+      e.preventDefault();
+      var lr = lastRemoved;
+      lastRemoved = null;
+      state.courses.splice(Math.min(lr.index, state.courses.length), 0, lr.course);
+      renderCourses();
+      render();
+      toast("已恢复「" + (String(lr.course.name || "").trim() || "未命名课程") + "」");
+      return;
+    }
+
+    // 在最后一行课程输入框按 Enter，直接新增一门
+    if (e.key === "Enter" && e.target && e.target.matches && e.target.matches("#courseList input")){
+      var rows = $("courseList").querySelectorAll(".cr");
+      var idx = Array.prototype.indexOf.call(rows, e.target.closest(".cr"));
+      if (idx === rows.length - 1){
+        e.preventDefault();
+        $("addCourse").click();
+      }
+    }
+  });
 
   /* ---------- 分享卡 ---------- */
   $("exportBtn").addEventListener("click", function(){
@@ -1067,16 +1543,23 @@
   });
 
   /* ---------- 初始化 ---------- */
-  load();
-  if (state.scale !== "4.0"){
+
+  // 把 state 同步到所有控件（初始化与导入备份后都需要）
+  function syncControls(){
+    $("target").value = state.target;
+    $("remain").value = state.remain;
+    $("simRange").value = state.sim;
     Array.prototype.forEach.call($("seg").children, function(x){
       x.classList.toggle("on", x.dataset.s === state.scale);
     });
+    Array.prototype.forEach.call($("scopeSeg").children, function(x){
+      x.classList.toggle("on", x.dataset.scope === state.scope);
+    });
+    paintChips();
   }
-  $("target").value = state.target;
-  $("remain").value = state.remain;
-  $("simRange").value = state.sim;
-  paintChips();
+
+  load();
+  syncControls();
   renderCourses();
   render();
 })();
