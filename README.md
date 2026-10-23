@@ -4,7 +4,7 @@
 
 多数绩点工具只回答「我已经考成什么样」。这个工具反过来问：**要达到目标，剩下的课要考多少分** —— 并直接判断这个目标是否现实。
 
-**在线体验**：[workbuddy.link/p/TpUVG8RR5boUDUJ9VL4bBU](https://workbuddy.link/p/TpUVG8RR5boUDUJ9VL4bBU)
+作者：Steven Xiao · 双击 `index.html` 即可运行，无需安装、无需联网。
 
 ![主面板](screenshots/01-panel.png)
 
@@ -60,11 +60,10 @@ gpa-planner/
 │   └── share-card-score100.png
 ├── scripts/
 │   ├── capture-screenshots.js      # 批量生成上表截图
-│   └── smoke-test.js               # 三制式 + 四状态回归测试
-├── docs/
-│   └── submission.md               # 参赛投稿材料（简介 / 文案 / 清单）
+│   └── smoke-test.js               # 42 项回归测试
 ├── package.json
 ├── .gitignore
+├── .gitattributes
 └── README.md
 ```
 
@@ -168,6 +167,8 @@ CHROME_PATH="/path/to/chrome" npm test
 
 ---
 
-## 授权
+## 作者与授权
 
-本项目为 WorkBuddy「1024 造物挑战」程序员节应用创作大赛参赛作品，作者保留著作权。
+- 作者：Steven Xiao（[@Nance-Mike](https://github.com/Nance-Mike)）
+- 本项目由作者独立设计与开发，著作权归作者所有（© 2026 Steven Xiao）。
+- 未经作者许可，不得用于商业用途或二次分发；个人学习与使用不受限制。

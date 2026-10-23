@@ -1,8 +1,9 @@
 {
   "name": "gpa-planner",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "绩点推演器 · 录入学过的课，设定目标绩点，反推剩余课程需要考多少分",
+  "author": "Steven Xiao <thdshyxh@gmail.com> (https://github.com/Nance-Mike)",
   "keywords": [
     "gpa",
     "calculator",

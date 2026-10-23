@@ -29,6 +29,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="description" content="录入学过的课，设定目标绩点，反推剩余课程需要考多少分。支持 4.0 制、5.0 制与百分制，数据仅保存在本地。" />
+<meta name="author" content="Steven Xiao" />
 <meta name="theme-color" content="#123A5F" />
 <title>绩点推演器 · 保研目标反推</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23123A5F'/%3E%3Cpath d='M14 46 L26 32 L36 38 L50 20' stroke='%235FD0E8' stroke-width='5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
@@ -477,7 +478,8 @@
 
   <footer>
     绩点推演器 · 数据仅存本地，刷新不丢失<br />
-    换算口径以你所在学校教务规定为准，结果仅供规划参考
+    换算口径以你所在学校教务规定为准，结果仅供规划参考<br />
+    <span style="opacity:.75">© 2026 Steven Xiao</span>
   </footer>
 </div>
 
@@ -1515,7 +1517,7 @@
 
     g.fillStyle = "rgba(255,255,255,.34)";
     g.font = font(26, 400);
-    g.fillText("用 WorkBuddy 绩点推演器生成 · 换算口径以本校教务规定为准", pad, 1300);
+    g.fillText("绩点推演器 · 换算口径以本校教务规定为准", pad, 1300);
 
     function roundRect(ctx, x, y, w, h, r2){
       ctx.beginPath();

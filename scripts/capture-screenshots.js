@@ -1,5 +1,5 @@
 /**
- * 生成 README 与投稿材料所用的截图。
+ * 生成 README 文档所用的截图。
  *
  * 用法：
  *   npm run screenshots
